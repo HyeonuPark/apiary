@@ -1,0 +1,43 @@
+[package]
+name = "apiary"
+version = "0.1.0"
+authors = [ "HyeonuPark <nemo1275@gmail.com>" ]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+description = "HTTP API as a trait"
+repository = "https://github.com/HyeonuPark/apiary"
+documentation = "https://docs.rs/apiary"
+readme = "README.md"
+categories = [ ]
+
+[dependencies]
+bytes = "1"
+bytestring = "1"
+futures-channel = "0.3"
+futures-core = "0.3"
+http = "0.2"
+pin-project = "1"
+thiserror = "1"
+
+[dependencies.hyper]
+version = "0.14"
+features = [
+    "server",
+    "tcp",
+    "http1",
+    "http2",
+]
+
+[dependencies.tokio]
+version = "1"
+features = [
+    "rt",
+    "sync",
+]
+
+[dependencies.tower]
+version = "0.4"
+features = [
+    "make",
+]
+

@@ -1,0 +1,47 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  cargo-tools:
+    name: Cargo tools
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout sources
+      uses: actions/checkout@v2
+
+    - name: Install stable toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+        components: rustfmt, clippy
+
+    - name: Check cargo fmt
+      uses: actions-rs/cargo@v1
+      with:
+        command: fmt
+        args: --all -- --check
+
+    - name: Run cargo clippy
+      uses: actions-rs/cargo@v1
+      with:
+        command: clippy
+        args: -- -D warnings
+
+    - name: Run cargo test
+      uses: actions-rs/cargo@v1
+      with:
+        command: test
+        args: --all
+
+    - name: Install the cargo-sort-ck
+      uses: actions-rs/cargo@v1
+      with:
+        command: install
+        args: cargo-sort-ck
+
+    - name: Check if the Cargo.toml is sorted
+      uses: actions-rs/cargo@v1
+      with:
+        command: sort-ck

@@ -1,0 +1,13 @@
+[package]
+name = "apiary-macro"
+version = "0.1.0"
+authors = ["HyeonuPark <nemo1275@gmail.com>"]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+description = "Macros for the apiary crate"
+repository = "https://github.com/HyeonuPark/apiary"
+documentation = "https://docs.rs/apiary-macro"
+readme = "README.md"
+categories = []
+
+[dependencies]
