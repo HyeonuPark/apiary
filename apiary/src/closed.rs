@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -16,12 +17,12 @@ use pin_project::pin_project;
 #[derive(Debug)]
 pub struct ConnectionClosed {
     #[pin]
-    receiver: oneshot::Receiver<()>,
+    receiver: oneshot::Receiver<Infallible>,
 }
 
 #[derive(Debug)]
 pub struct ConnectionCloseGuard {
-    sender: oneshot::Sender<()>,
+    sender: oneshot::Sender<Infallible>,
 }
 
 impl ConnectionClosed {
@@ -38,11 +39,9 @@ impl Future for ConnectionClosed {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        const MSG: &str = "Oneshot channel inside of the connection closed future \
-            should never send the normal message";
-        self.project()
-            .receiver
-            .poll(cx)
-            .map(|res| debug_assert!(matches!(res, Err(_)), MSG))
+        self.project().receiver.poll(cx).map(|res| match res {
+            Ok(nvr) => match nvr {},
+            Err(oneshot::Canceled { .. }) => {}
+        })
     }
 }

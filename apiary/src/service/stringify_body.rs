@@ -138,16 +138,18 @@ where
                     buf,
                     inner,
                 } => match ready!(body.poll_data(cx)) {
-                    Some(Err(err)) => Some(CallFuture::Failed(ErrorReadRequest::from(err).into())),
+                    Some(Err(err)) => error(ErrorReadRequest::from(err)),
                     Some(Ok(chunk)) => {
                         buf.extend_from_slice(&chunk);
                         None
                     }
                     // TODO: support http/2 trailer headers
                     None => match String::from_utf8(mem::take(buf)) {
-                        Err(err) => Some(CallFuture::Failed(ErrorNotUtf8::from(err).into())),
+                        Err(err) => error(ErrorNotUtf8::from(err)),
                         Ok(s) => {
-                            let head = head.take().expect("request body is terminated twice");
+                            let head = head
+                                .take()
+                                .expect("should be Pending state after the first Ok");
                             let req = Request::from_parts(head, s);
                             let fut = inner.call(req);
                             Some(CallFuture::Pending(fut))
@@ -156,7 +158,7 @@ where
                 },
                 Proj::Pending(fut) => match ready!(fut.poll(cx)) {
                     Ok(res) => return Poll::Ready(Ok(res.map(Into::into))),
-                    Err(err) => Some(CallFuture::Failed(err.into())),
+                    Err(err) => error(err),
                 },
                 Proj::Failed(err) => {
                     return Poll::Ready(Err(mem::replace(err, PolledAfterComplete.into())))
@@ -168,4 +170,12 @@ where
             }
         }
     }
+}
+
+fn error<T, E>(err: E) -> Option<CallFuture<T>>
+where
+    T: tower::Service<Request<String>>,
+    E: Into<BoxError>,
+{
+    Some(CallFuture::Failed(err.into()))
 }

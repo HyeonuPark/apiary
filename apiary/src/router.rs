@@ -18,10 +18,10 @@ use crate::BoxError;
 
 type RespResult = Result<Response<String>, BoxError>;
 
-/// Router type which holds both the Arc-ed app and the routing logic.
+/// Router type which holds both the Arc-ed app and the routing handler.
 pub struct Router<App: ?Sized> {
     pub app: Arc<App>,
-    pub logic: fn(Arc<App>, Request<String>, ConnectionClosed) -> JoinHandle<RespResult>,
+    pub handler: fn(Arc<App>, Request<String>, ConnectionClosed) -> JoinHandle<RespResult>,
 }
 
 impl<App: Send + Sync + ?Sized + 'static> Router<App> {
@@ -52,7 +52,7 @@ impl<App: Send + Sync + ?Sized> Service<Request<String>> for Router<App> {
 
     fn call(&mut self, req: Request<String>) -> Self::Future {
         let (closed, guard) = ConnectionClosed::new();
-        let handle = (self.logic)(Arc::clone(&self.app), req, closed);
+        let handle = (self.handler)(Arc::clone(&self.app), req, closed);
         CallFuture { handle, guard }
     }
 }
@@ -69,7 +69,7 @@ impl<App: ?Sized> Clone for Router<App> {
     fn clone(&self) -> Self {
         Router {
             app: Arc::clone(&self.app),
-            logic: self.logic,
+            handler: self.handler,
         }
     }
 }
