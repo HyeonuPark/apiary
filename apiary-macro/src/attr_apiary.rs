@@ -4,8 +4,8 @@ use std::mem;
 
 use proc_macro2::TokenStream;
 use proc_macro_error::emit_error;
-use quote::{ToTokens, quote_spanned};
-use syn::parse_quote;
+use quote::ToTokens;
+use syn::{parse_quote, spanned::Spanned};
 
 pub fn process(_param: TokenStream, item: TokenStream) -> Option<TokenStream> {
     let mut input_trait: syn::ItemTrait = syn::parse2(item).expect("some fancy msg");
@@ -14,13 +14,9 @@ pub fn process(_param: TokenStream, item: TokenStream) -> Option<TokenStream> {
     let mut handler: syn::ExprBlock = parse_quote! {{
         let (request, body) = request.into_parts();
         let method = request.method.clone();
-        let paths = request.path();
-        let paths = if paths.starts_with("/") {
-            &paths[1..]
-        } else {
-            paths
-        };
-        let paths: Vec<_> = paths[1..].split('/').collect();
+        let paths = request.uri.path();
+        let paths = paths.strip_prefix('/').unwrap_or(paths);
+        let paths: Vec<_> = paths.split('/').collect();
     }};
 
     for item in &mut input_trait.items {
@@ -55,7 +51,7 @@ pub fn process(_param: TokenStream, item: TokenStream) -> Option<TokenStream> {
 
     let to_router: syn::TraitItemMethod = parse_quote! {
         #[allow(warnings)]
-        fn to_router(self: Arc<Self>) -> apiary::Router {
+        fn to_router(self: Arc<Self>) -> apiary::Router<Self> where Self: Send + Sync + 'static {
             apiary::Router {
                 app: self,
                 handler: |app, request, closed| #handler,
@@ -102,7 +98,7 @@ fn extract_route(item: &mut syn::TraitItem) -> Option<syn::ExprIf> {
             return None;
         }
     };
-    let http_method = PATHS.with(|paths| paths[&meta.path].clone());
+    // let http_method = PATHS.with(|paths| paths[&meta.path].clone());
 
     let path = match meta.nested.first().unwrap() {
         syn::NestedMeta::Lit(syn::Lit::Str(lit)) => lit.value(),
@@ -127,14 +123,14 @@ fn extract_route(item: &mut syn::TraitItem) -> Option<syn::ExprIf> {
         return None;
     }
 
-    let mut path_params = Vec::new();
+    let mut path_params = HashMap::new();
     let mut segments = Vec::new();
     let mut validator = String::new();
 
     for (idx, seg) in path.split('/').enumerate() {
         let param = seg.strip_prefix('{').and_then(|s| s.strip_suffix('}'));
         if let Some(name) = param {
-            path_params.push((name, idx));
+            path_params.insert(name.to_string(), idx);
             segments.push(None);
         } else {
             segments.push(Some(seg));
@@ -167,9 +163,9 @@ fn extract_route(item: &mut syn::TraitItem) -> Option<syn::ExprIf> {
         match arg {
             syn::FnArg::Receiver(_) => false,
             syn::FnArg::Typed(pt) => {
-                PAT_SELF.with(|var_self| var_self == &*pt.pat) &&
-                    TY_ARC_SELF.with(|ty_arc_self| ty_arc_self == &*pt.ty)
-            },
+                PAT_SELF.with(|var_self| var_self == &*pt.pat)
+                    && TY_ARC_SELF.with(|ty_arc_self| ty_arc_self == &*pt.ty)
+            }
         }
     });
     if !is_arc_self {
@@ -177,29 +173,91 @@ fn extract_route(item: &mut syn::TraitItem) -> Option<syn::ExprIf> {
         return None;
     }
 
+    let mut args = Vec::new();
+
     for arg in sig.inputs.iter().skip(1) {
         let arg = match arg {
-            syn::FnArg::Receiver(_) => unreachable!("Only first arg can be the receiver"),
+            syn::FnArg::Receiver(_) => {
+                emit_error!(arg, "Only first arg can be the receiver");
+                continue;
+            }
             syn::FnArg::Typed(arg) => arg,
         };
         let name = match &*arg.pat {
-            syn::Pat::Ident(syn::PatIdent { subpat: None, ident, .. }) => ident,
+            syn::Pat::Ident(syn::PatIdent {
+                subpat: None,
+                ident,
+                ..
+            }) => ident.to_string(),
             _ => {
                 emit_error!(arg, "Argument should have single name");
-                continue
+                continue;
             }
         };
-        if let Some((_, idx)) = path_params.iter().find(|(param, idx)| name == param) {
-            ;
-        } else {
-            emit_error!(arg, "Cannot find argument name from the path parameters");
-            continue
-        }
+        let idx = match path_params.remove(&name) {
+            Some(idx) => idx,
+            _ => {
+                emit_error!(arg, "Cannot find argument name from the path parameters");
+                continue;
+            }
+        };
+
+        args.push((name, arg.ty.clone(), idx));
     }
 
-    None
+    for (name, _) in path_params {
+        emit_error!(
+            attr,
+            "Cannot find path parameter {} from the attribute",
+            name
+        );
+    }
+
+    let seg_len = segments.len();
+    // TODO: HTTP method check
+    let mut cond: syn::ExprBinary = parse_quote!(paths.len() == #seg_len);
+
+    for (idx, seg) in segments.iter().enumerate().filter(|(_, seg)| seg.is_some()) {
+        let seg = seg.as_ref().unwrap();
+        cond = parse_quote!(#cond && paths[#idx] == #seg);
+    }
+
+    let mut match_cond: syn::ExprTuple = parse_quote!(());
+
+    let mut arm: syn::Arm = parse_quote!(() => (),);
+    let ok_pat = match &mut arm.pat {
+        syn::Pat::Tuple(pat) => &mut pat.elems,
+        _ => unreachable!("It should be parsed as tuple pattern"),
+    };
+
+    let method_name = &method.sig.ident;
+    let mut call: syn::ExprMethodCall = parse_quote!(app.#method_name());
+
+    for (name, ty, idx) in args {
+        match_cond
+            .elems
+            .push(parse_quote!(<#ty as std::str::FromStr>::from_str(&paths[#idx])));
+
+        let name = syn::Ident::new(&name, ty.span());
+        ok_pat.push(parse_quote!(Ok(#name)));
+        call.args.push(parse_quote!(#name));
+    }
+
+    arm.body = Box::new(parse_quote!(tokio::spawn(async move {
+        let resp = #call.await?;
+        Ok(apiary::internal_helper::http::response::Response::new(resp))
+    })));
+
+    Some(parse_quote! {
+        if #cond {
+            return match #match_cond {
+                #arm
+                _ => tokio::spawn(apiary::internal_helper::parse_failed()),
+            };
+        }
+    })
 }
 
-fn extract_default_route(item: &mut syn::TraitItem) -> Option<(syn::Expr, syn::Attribute)> {
+fn extract_default_route(_item: &mut syn::TraitItem) -> Option<(syn::Expr, syn::Attribute)> {
     None
 }

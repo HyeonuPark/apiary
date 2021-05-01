@@ -138,14 +138,14 @@ where
                     buf,
                     inner,
                 } => match ready!(body.poll_data(cx)) {
-                    Some(Err(err)) => error(ErrorReadRequest::from(err)),
+                    Some(Err(err)) => Some(error(ErrorReadRequest::from(err))),
                     Some(Ok(chunk)) => {
                         buf.extend_from_slice(&chunk);
                         None
                     }
                     // TODO: support http/2 trailer headers
                     None => match String::from_utf8(mem::take(buf)) {
-                        Err(err) => error(ErrorNotUtf8::from(err)),
+                        Err(err) => Some(error(ErrorNotUtf8::from(err))),
                         Ok(s) => {
                             let head = head
                                 .take()
@@ -158,7 +158,7 @@ where
                 },
                 Proj::Pending(fut) => match ready!(fut.poll(cx)) {
                     Ok(res) => return Poll::Ready(Ok(res.map(Into::into))),
-                    Err(err) => error(err),
+                    Err(err) => Some(error(err)),
                 },
                 Proj::Failed(err) => {
                     return Poll::Ready(Err(mem::replace(err, PolledAfterComplete.into())))
@@ -172,10 +172,10 @@ where
     }
 }
 
-fn error<T, E>(err: E) -> Option<CallFuture<T>>
+fn error<T, E>(err: E) -> CallFuture<T>
 where
     T: tower::Service<Request<String>>,
     E: Into<BoxError>,
 {
-    Some(CallFuture::Failed(err.into()))
+    CallFuture::Failed(err.into())
 }

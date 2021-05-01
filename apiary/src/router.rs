@@ -16,7 +16,7 @@ use crate::server::Server;
 use crate::service::ServiceBuilderExt;
 use crate::BoxError;
 
-type RespResult = Result<Response<String>, BoxError>;
+pub(crate) type RespResult = Result<Response<String>, BoxError>;
 
 /// Router type which holds both the Arc-ed app and the routing handler.
 pub struct Router<App: ?Sized> {
