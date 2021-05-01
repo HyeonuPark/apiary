@@ -14,4 +14,14 @@ pub use error::Error;
 pub use router::Router;
 pub use server::Server;
 pub use service::ServiceBuilderExt;
+
+pub use http::{header, Method, StatusCode};
 pub use tower::ServiceBuilder;
+
+#[cfg(feature = "macro")]
+pub use apiary_macro::apiary;
+
+// only for the internal use
+#[cfg(feature = "macro")]
+#[doc(hidden)]
+pub mod internal_helper;

@@ -41,3 +41,14 @@ features = [
     "make",
 ]
 
+[dependencies.apiary-macro]
+version = "0.1"
+path = "../apiary-macro"
+optional = true
+
+[dev-dependencies]
+async-trait = "0.1"
+
+[features]
+default = ["macro"]
+macro = ["apiary-macro"]

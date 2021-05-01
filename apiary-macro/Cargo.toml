@@ -10,4 +10,12 @@ documentation = "https://docs.rs/apiary-macro"
 readme = "README.md"
 categories = []
 
+[lib]
+proc-macro = true
+
 [dependencies]
+syn = { version = "1", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"
+proc-macro-error = "1"
+http = "0.2"
