@@ -8,7 +8,7 @@ mod attr_apiary;
 
 #[proc_macro_attribute]
 #[proc_macro_error]
-pub fn apiary(param: TokenStream, item: TokenStream) -> TokenStream {
+pub fn api(param: TokenStream, item: TokenStream) -> TokenStream {
     let res = attr_apiary::process(param.into(), item.into());
     abort_if_dirty();
     res.unwrap().into()

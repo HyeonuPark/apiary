@@ -17,11 +17,12 @@ use crate::service::ServiceBuilderExt;
 use crate::BoxError;
 
 pub(crate) type RespResult = Result<Response<String>, BoxError>;
+pub type HandlerResult = JoinHandle<RespResult>;
 
 /// Router type which holds both the Arc-ed app and the routing handler.
 pub struct Router<App: ?Sized> {
     pub app: Arc<App>,
-    pub handler: fn(Arc<App>, Request<String>, ConnectionClosed) -> JoinHandle<RespResult>,
+    pub handler: fn(Arc<App>, Request<String>, ConnectionClosed) -> HandlerResult,
 }
 
 impl<App: Send + Sync + ?Sized + 'static> Router<App> {
@@ -37,7 +38,7 @@ impl<App: Send + Sync + ?Sized + 'static> Router<App> {
 #[derive(Debug)]
 pub struct CallFuture {
     #[pin]
-    handle: JoinHandle<RespResult>,
+    handle: HandlerResult,
     guard: ConnectionCloseGuard,
 }
 
