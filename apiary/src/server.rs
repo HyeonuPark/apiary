@@ -1,74 +1,71 @@
 use std::future::Future;
+#[cfg(feature = "hyper")]
 use std::net::SocketAddr;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-use http::{Request, Response};
-use hyper::body::Body;
-use hyper::server::accept::Accept;
-use hyper::server::Builder;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tower::{make::Shared, Service};
+use http::{header, Request, Response, StatusCode};
+use http_body::Body as HttpBody;
 
-pub use hyper::server::conn::{AddrIncoming, Http as HttpConfig};
-
+use crate::response;
 use crate::BoxError;
 
-pub struct Server<S, A = AddrIncoming> {
-    service: S,
-    accept: A,
-    config: HttpConfig,
-}
+#[cfg(feature = "hyper")]
+mod with_hyper;
 
-impl<S> Server<S> {
-    pub fn bind(addr: SocketAddr, service: S) -> Result<Self, BoxError> {
-        let accept = AddrIncoming::bind(&addr)?;
+#[cfg(feature = "hyper")]
+pub use with_hyper::Hyper;
 
-        Ok(Self::with_acceptor(accept, service))
+pub type ServeResult =
+    Pin<Box<dyn Future<Output = Result<Response<response::Body>, BoxError>> + Send + 'static>>;
+
+pub trait Server: Clone + Send + 'static {
+    fn serve<B: HttpBody>(self, request: Request<B>) -> ServeResult;
+
+    fn into_service(self) -> Service<Self> {
+        Service(self)
+    }
+
+    #[cfg(feature = "hyper")]
+    fn bind(self, addr: SocketAddr) -> hyper::Result<Hyper<Self>> {
+        Hyper::bind(self, addr)
+    }
+
+    #[cfg(feature = "hyper")]
+    fn with_acceptor<A>(self, accept: A) -> Hyper<Self, A> {
+        Hyper::with_acceptor(self, accept)
     }
 }
 
-impl<S, A> Server<S, A>
-where
-    A: Accept,
-    A::Conn: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    A::Error: Into<BoxError>,
-{
-    pub fn with_acceptor(accept: A, service: S) -> Self {
-        Self {
-            service,
-            accept,
-            config: HttpConfig::new(),
-        }
+#[derive(Debug, Clone)]
+pub struct Service<S: Server>(S);
+
+#[derive(Debug)]
+pub struct NotFound;
+
+impl<S: Server, B: HttpBody> tower::Service<Request<B>> for Service<S> {
+    type Response = Response<response::Body>;
+    type Error = BoxError;
+    type Future = ServeResult;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
-    pub fn config(&mut self) -> &mut HttpConfig {
-        &mut self.config
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        self.0.clone().serve(req)
     }
+}
 
-    pub async fn run(self) -> Result<(), BoxError>
-    where
-        S: Service<Request<Body>, Response = Response<Body>> + Clone + Send + 'static,
-        S::Future: Send + 'static,
-        S::Error: Into<BoxError>,
-    {
-        Builder::new(self.accept, self.config)
-            .serve(Shared::new(self.service))
-            .await?;
+impl crate::response::Response for NotFound {
+    fn into_response(self) -> Result<Response<response::Body>, BoxError> {
+        let resp = "404 Not Found";
 
-        Ok(())
-    }
-
-    pub async fn run_until<F>(self, signal: F) -> Result<(), BoxError>
-    where
-        F: Future<Output = ()>,
-        S: Service<Request<Body>, Response = Response<Body>> + Clone + Send + 'static,
-        S::Future: Send + 'static,
-        S::Error: Into<BoxError>,
-    {
-        Builder::new(self.accept, self.config)
-            .serve(Shared::new(self.service))
-            .with_graceful_shutdown(signal)
-            .await?;
-
-        Ok(())
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .header(header::CONTENT_TYPE, crate::response::CONTENT_TYPE_TEXT)
+            .header(header::CONTENT_LENGTH, resp.len())
+            .body(response::Body::once(resp))
+            .map_err(|err| Box::new(err) as _)
     }
 }

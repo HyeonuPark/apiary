@@ -1,8 +1,8 @@
-use apiary::api;
+use apiary::{api, server::Server};
 use async_trait::async_trait;
 use std::sync::Arc;
 
-#[api]
+#[api(server(FooServer))]
 #[async_trait]
 pub trait Foo: Send + Sync + 'static {
     #[get("/foo/{bar}/{baz}/quux")]
@@ -20,9 +20,10 @@ impl Foo for Bar {
 
 #[tokio::main]
 async fn main() {
-    Arc::new(Bar)
-        .router()
-        .run("127.0.0.1:9000".parse().unwrap())
+    FooServer(Arc::new(Bar))
+        .bind("127.0.0.1:9000".parse().unwrap())
+        .unwrap()
+        .run()
         .await
         .unwrap();
 }

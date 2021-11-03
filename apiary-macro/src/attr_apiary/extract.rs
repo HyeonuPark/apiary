@@ -6,6 +6,7 @@ use super::fixture::Fixture;
 
 #[derive(Debug)]
 pub struct Extracted {
+    pub trait_name: syn::Ident,
     pub methods: Vec<Method>,
 }
 
@@ -34,7 +35,10 @@ pub fn extract(input_trait: &mut syn::ItemTrait, fixture: &Fixture) -> Option<Ex
         })
         .collect();
 
-    Some(Extracted { methods })
+    Some(Extracted {
+        trait_name: input_trait.ident.clone(),
+        methods,
+    })
 }
 
 fn extract_method(method: &mut syn::TraitItemMethod, fixture: &Fixture) -> Option<Method> {

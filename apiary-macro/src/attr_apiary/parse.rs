@@ -8,6 +8,7 @@ use super::fixture::Fixture;
 
 #[derive(Debug)]
 pub struct Parsed {
+    pub trait_name: syn::Ident,
     pub handlers: Vec<Handler>,
 }
 
@@ -33,11 +34,12 @@ pub struct Param {
 
 #[derive(Debug)]
 pub enum ParamSrc {
-    Path { idx: usize, is_result: bool },
+    Path { idx: usize },
 }
 
 pub fn parse(extracted: &Extracted, fixture: &Fixture) -> Option<Parsed> {
     Some(Parsed {
+        trait_name: extracted.trait_name.clone(),
         handlers: extracted
             .methods
             .iter()
@@ -117,12 +119,10 @@ pub fn parse(extracted: &Extracted, fixture: &Fixture) -> Option<Parsed> {
                     .iter()
                     .filter_map(|arg| {
                         if let Some(idx) = path_params.remove(&arg.name.to_string()) {
-                            let is_result = fixture.is_result_type(&arg.ty);
-
                             Some(Param {
                                 name: arg.name.clone(),
                                 ty: arg.ty.clone(),
-                                src: ParamSrc::Path { idx, is_result },
+                                src: ParamSrc::Path { idx },
                             })
                         } else {
                             emit_error!(

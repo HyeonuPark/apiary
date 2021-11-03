@@ -16,11 +16,13 @@ bytestring = "1"
 futures-channel = "0.3"
 futures-core = "0.3"
 http = "0.2"
+http-body = "0.4"
 pin-project = "1"
 thiserror = "1"
 
 [dependencies.hyper]
 version = "0.14"
+optional = true
 features = [
     "server",
     "tcp",

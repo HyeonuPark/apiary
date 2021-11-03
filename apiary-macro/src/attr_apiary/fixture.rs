@@ -7,10 +7,9 @@ pub struct Fixture {
 }
 
 impl Fixture {
-    const ROUTER: &'static str = "router";
     const GET: &'static str = "get";
     const DOC: &'static str = "doc";
-    const RESULT: &'static str = "Result";
+    const SERVER: &'static str = "server";
 
     pub fn new() -> Self {
         Fixture {
@@ -18,10 +17,6 @@ impl Fixture {
             pat_self: parse_quote!(self),
             ty_arc_self: parse_quote!(Arc<Self>),
         }
-    }
-
-    pub fn is_fn_router(&self, sig: &syn::Signature) -> bool {
-        sig.ident == Self::ROUTER
     }
 
     pub fn is_async_trait_param(&self, param: &syn::GenericParam) -> bool {
@@ -43,18 +38,11 @@ impl Fixture {
         attr.path.is_ident(Self::DOC)
     }
 
-    pub fn is_result_type(&self, ty: &syn::Type) -> bool {
-        match ty {
-            syn::Type::Path(ty) => {
-                ty.qself.is_none() && ty.path.segments.last().unwrap().ident == Self::RESULT
-            }
-            syn::Type::Paren(syn::TypeParen { elem, .. })
-            | syn::Type::Group(syn::TypeGroup { elem, .. }) => self.is_result_type(elem),
-            _ => false,
-        }
-    }
-
     pub fn is_get(&self, p: &syn::Path) -> bool {
         p.is_ident(Self::GET)
+    }
+
+    pub fn is_server(&self, p: &syn::Path) -> bool {
+        p.is_ident(Self::SERVER)
     }
 }

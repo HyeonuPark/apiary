@@ -1,55 +1,74 @@
 use proc_macro2::TokenStream;
-use proc_macro_error::{emit_call_site_error, emit_error, ResultExt};
+use proc_macro_error::{emit_call_site_error, emit_error};
 use syn::parse_quote;
+use syn::punctuated::Punctuated;
 
 mod extract;
 mod fixture;
 mod parse;
 
+mod server;
+
 use fixture::Fixture;
 use parse::{ParamSrc, Parsed};
 
-pub fn process(_param: TokenStream, item: TokenStream) -> Option<TokenStream> {
-    let mut input_trait: syn::ItemTrait =
-        syn::parse2(item).expect_or_abort("#[api] should be placed on the trait definition");
-
+pub fn process(args: syn::AttributeArgs, mut input_trait: syn::ItemTrait) -> Option<TokenStream> {
     let fixture = Fixture::new();
-    if !is_valid(&input_trait, &fixture) {
+    if async_trait_expanded_before(&input_trait, &fixture) {
+        emit_call_site_error!("#[api] should be placed above the #[async_trait]");
         return None;
     }
-    let extracted = extract::extract(&mut input_trait, &fixture)?;
-    let parsed = parse::parse(&extracted, &fixture)?;
-    let gen_method = codegen(&parsed);
-    input_trait.items.push(syn::TraitItem::Method(gen_method));
 
-    Some(quote::quote! {
-        #input_trait
-    })
-}
+    let mut server_args = None;
 
-fn is_valid(input_trait: &syn::ItemTrait, fixture: &Fixture) -> bool {
-    for item in &input_trait.items {
-        if let syn::TraitItem::Method(method) = item {
-            if fixture.is_fn_router(&method.sig) {
-                emit_error!(
-                    method.sig.ident,
-                    "method name conflict with the one generated from the #[api] attribute"
-                )
+    for arg in args {
+        let (path, args) = match arg {
+            syn::NestedMeta::Lit(_) | syn::NestedMeta::Meta(syn::Meta::NameValue(_)) => {
+                emit_error!(arg, "Invalid parameter");
+                continue;
             }
+            syn::NestedMeta::Meta(syn::Meta::Path(path)) => (path, Punctuated::new()),
+            syn::NestedMeta::Meta(syn::Meta::List(list)) => (list.path, list.nested),
+        };
 
-            for param in &method.sig.generics.params {
-                if fixture.is_async_trait_param(param) {
-                    emit_call_site_error!("#[api] should be placed above the #[async_trait]");
-                    return false;
-                }
+        if fixture.is_server(&path) {
+            if server_args.is_some() {
+                emit_error!(path, "Duplicated server parameter");
+            } else {
+                server_args = server::parse_args(args);
             }
+        } else {
+            emit_error!(path, "Invalid parameter");
         }
     }
 
-    true
+    let extracted = extract::extract(&mut input_trait, &fixture)?;
+    let parsed = parse::parse(&extracted, &fixture)?;
+
+    let mut generated = vec![syn::Item::Trait(input_trait)];
+
+    if let Some(args) = server_args {
+        generated.append(&mut server::codegen(args, &parsed));
+    }
+
+    Some(quote::quote! {
+        #(#generated)*
+    })
 }
 
-pub fn codegen(parsed: &Parsed) -> syn::TraitItemMethod {
+fn async_trait_expanded_before(input_trait: &syn::ItemTrait, fixture: &Fixture) -> bool {
+    input_trait
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::TraitItem::Method(meth) => Some(meth),
+            _ => None,
+        })
+        .flat_map(|meth| &meth.sig.generics.params)
+        .any(|p| fixture.is_async_trait_param(p))
+}
+
+pub fn _codegen(parsed: &Parsed) -> syn::TraitItemMethod {
     let body: Vec<syn::Stmt> = parsed
         .handlers
         .iter()
@@ -96,16 +115,7 @@ pub fn codegen(parsed: &Parsed) -> syn::TraitItemMethod {
                     let ty = param.ty.clone();
 
                     match &param.src {
-                        ParamSrc::Path {
-                            idx,
-                            is_result: true,
-                        } => parse_quote! {
-                            let #name: #ty = path[#idx].parse().map_err(From::from);
-                        },
-                        ParamSrc::Path {
-                            idx,
-                            is_result: false,
-                        } => parse_quote! {
+                        ParamSrc::Path { idx } => parse_quote! {
                             let #name: #ty = path[#idx].parse().ok()?;
                         },
                     }
